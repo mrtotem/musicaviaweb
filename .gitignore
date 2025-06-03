@@ -1,0 +1,51 @@
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Python (por si usás FastAPI u otros scripts)
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.env
+env/
+venv/
+ENV/
+.venv/
+
+# Frontend builds
+frontend-web/dist/
+frontend-web/.vite/
+
+# Editor/IDE configs
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Docker
+*.pid
+*.log
+docker-compose.override.yml
+
+# Env files
+.env
+.env.*
+
+# Build artifacts
+aoo-server/build/
+*.o
+*.so
+*.a
+*.out
+
+# OS-specific
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# NGINX cache or runtime
+nginx-proxy/cache/
