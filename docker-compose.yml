@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  frontend:
+    build: ./frontend-web
+  signaling:
+    build: ./signaling-server
+  coturn:
+    image: instrumentisto/coturn
+  nginx:
+    image: nginx:latest
+  aoo:
+    build: ./aoo-server
