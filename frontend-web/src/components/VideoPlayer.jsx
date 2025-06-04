@@ -1,4 +1,3 @@
-// src/components/VideoPlayer.jsx
 import React, { useEffect, useRef } from 'react';
 
 const VideoPlayer = ({ stream }) => {

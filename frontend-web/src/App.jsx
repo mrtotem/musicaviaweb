@@ -1,86 +1,112 @@
-// src/App.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import VideoPlayer from './components/VideoPlayer';
 
 function App() {
   const [localStream, setLocalStream] = useState(null);
   const [remoteStreams, setRemoteStreams] = useState([]);
+  const [room, setRoom] = useState('');
+  const socketRef = useRef(null);
+  const pcRefs = useRef({});
 
   useEffect(() => {
     const ws = new WebSocket('ws://localhost:3001');
-    const pc = new RTCPeerConnection();
+    socketRef.current = ws;
 
-    // Manejar candidatos ICE
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        ws.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
-      }
-    };
-
-    // Manejar tracks remotos
-    pc.ontrack = (event) => {
-      const remoteStream = event.streams[0];
-      setRemoteStreams((prev) => [...prev, remoteStream]);
-    };
-
-    // Obtener acceso a cámara y micrófono
-    navigator.mediaDevices
-      .getUserMedia({ video: true, audio: true })
-      .then((stream) => {
-        setLocalStream(stream);
-        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-      })
-      .catch((err) => {
-        console.error('Error al acceder a dispositivos multimedia:', err);
-      });
-
-    // Manejar mensajes del servidor de señalización
     ws.onmessage = async (msg) => {
       const data = JSON.parse(msg.data);
 
-      if (data.type === 'offer') {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        ws.send(JSON.stringify({ type: 'answer', sdp: answer }));
-      }
+      if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
+        const peerId = data.from;
 
-      if (data.type === 'answer') {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-      }
+        if (!pcRefs.current[peerId]) {
+          const pc = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+          });
 
-      if (data.type === 'candidate') {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-        } catch (e) {
-          console.error('Error al agregar ICE candidate:', e);
+          pc.onicecandidate = (e) => {
+            if (e.candidate && socketRef.current?.readyState === WebSocket.OPEN) {
+              socketRef.current.send(JSON.stringify({
+                type: 'candidate',
+                candidate: e.candidate,
+                to: peerId
+              }));
+            }
+          };
+
+          pc.ontrack = (e) => {
+            setRemoteStreams((prev) => [...prev, e.streams[0]]);
+          };
+
+          await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+
+          if (data.type === 'offer') {
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socketRef.current.send(JSON.stringify({
+              type: 'answer',
+              sdp: answer,
+              to: peerId
+            }));
+          }
+
+          pcRefs.current[peerId] = pc;
+        } else {
+          await pcRefs.current[peerId].addIceCandidate(new RTCIceCandidate(data.candidate));
         }
       }
     };
 
-    // Enviar mensaje JOIN al conectar
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'join', room: 'test-room' }));
-    };
-
     return () => {
       ws.close();
-      pc.close();
     };
   }, []);
 
+  const joinRoom = async () => {
+    if (!room.trim()) {
+      alert('Por favor ingresa un nombre de sala válido.');
+      return;
+    }
+
+    const ws = socketRef.current;
+    ws.send(JSON.stringify({ type: 'join', room }));
+
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    setLocalStream(stream);
+
+    stream.getTracks().forEach(track => {
+      for (const pc of Object.values(pcRefs.current)) {
+        pc.addTrack(track, stream);
+      }
+    });
+  };
+
   return (
     <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
-      <h2>Tu video local</h2>
-      {localStream && <VideoPlayer stream={localStream} />}
+      <h1>ConfApp - Clases Multipersona</h1>
 
-      <h2>Video remoto</h2>
-      {remoteStreams.length > 0 ? (
-        remoteStreams.map((stream, index) => (
-          <VideoPlayer key={index} stream={stream} />
-        ))
+      {!localStream ? (
+        <div>
+          <input
+            type="text"
+            value={room}
+            onChange={(e) => setRoom(e.target.value)}
+            placeholder="Nombre de la sala"
+            style={{ padding: '8px', width: '250px' }}
+          />
+          <button onClick={joinRoom} style={{ marginLeft: '10px', padding: '8px 12px' }}>Unirse a Sala</button>
+        </div>
       ) : (
-        <p>No hay video remoto conectado aún.</p>
+        <>
+          <h2>Tu video local</h2>
+          <VideoPlayer stream={localStream} />
+
+          <h2>Videos remotos</h2>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+            {remoteStreams.map((stream, index) => (
+              <VideoPlayer key={index} stream={stream} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
