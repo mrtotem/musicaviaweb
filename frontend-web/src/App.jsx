@@ -1,65 +1,67 @@
-
-import { useEffect, useRef, useState } from "react";
-
-const SIGNALING_SERVER_URL = "ws://localhost:3001";
-const ROOM_NAME = "demo";
+// src/App.jsx
+import React, { useState, useEffect } from 'react';
+import VideoPlayer from './components/VideoPlayer';
 
 function App() {
-  const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
-  const wsRef = useRef(null);
-  const pcRef = useRef(null);
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStreams, setRemoteStreams] = useState([]);
 
   useEffect(() => {
-    const ws = new WebSocket(SIGNALING_SERVER_URL);
-    wsRef.current = ws;
+    const ws = new WebSocket('ws://localhost:3001');
+    const pc = new RTCPeerConnection();
 
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
-    pcRef.current = pc;
-
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
-      localVideoRef.current.srcObject = stream;
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-    });
-
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "join", room: ROOM_NAME }));
-    };
-
-    ws.onmessage = async (event) => {
-      const data = JSON.parse(event.data);
-
-      if (data.type === "offer") {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        ws.send(JSON.stringify({ type: "answer", answer }));
-      } else if (data.type === "answer") {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-      } else if (data.type === "candidate") {
-        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-      }
-    };
-
+    // Manejar candidatos ICE
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        ws.send(JSON.stringify({ type: "candidate", candidate: event.candidate }));
+        ws.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
       }
     };
 
+    // Manejar tracks remotos
     pc.ontrack = (event) => {
-      remoteVideoRef.current.srcObject = event.streams[0];
+      const remoteStream = event.streams[0];
+      setRemoteStreams((prev) => [...prev, remoteStream]);
     };
 
-    const startConnection = async () => {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      ws.send(JSON.stringify({ type: "offer", offer }));
+    // Obtener acceso a cámara y micrófono
+    navigator.mediaDevices
+      .getUserMedia({ video: true, audio: true })
+      .then((stream) => {
+        setLocalStream(stream);
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      })
+      .catch((err) => {
+        console.error('Error al acceder a dispositivos multimedia:', err);
+      });
+
+    // Manejar mensajes del servidor de señalización
+    ws.onmessage = async (msg) => {
+      const data = JSON.parse(msg.data);
+
+      if (data.type === 'offer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify({ type: 'answer', sdp: answer }));
+      }
+
+      if (data.type === 'answer') {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+      }
+
+      if (data.type === 'candidate') {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (e) {
+          console.error('Error al agregar ICE candidate:', e);
+        }
+      }
     };
 
-    setTimeout(startConnection, 1000); // Delay for joining room
+    // Enviar mensaje JOIN al conectar
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'join', room: 'test-room' }));
+    };
 
     return () => {
       ws.close();
@@ -68,10 +70,18 @@ function App() {
   }, []);
 
   return (
-    <div>
-      <h1>ConfApp WebRTC Demo</h1>
-      <video ref={localVideoRef} autoPlay muted playsInline width="300" />
-      <video ref={remoteVideoRef} autoPlay playsInline width="300" />
+    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
+      <h2>Tu video local</h2>
+      {localStream && <VideoPlayer stream={localStream} />}
+
+      <h2>Video remoto</h2>
+      {remoteStreams.length > 0 ? (
+        remoteStreams.map((stream, index) => (
+          <VideoPlayer key={index} stream={stream} />
+        ))
+      ) : (
+        <p>No hay video remoto conectado aún.</p>
+      )}
     </div>
   );
 }
